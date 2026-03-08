@@ -3,6 +3,7 @@ title: "FritoAttritionRMD"
 author: "Bui, Andy"
 date: "2026-02-26"
 output: html_document
+#youtube: https://youtu.be/x8qkiDvJKOI
 ---
 
 ```{r setup, include=FALSE}
@@ -528,3 +529,4 @@ write.csv(comp_thresh_id, "Case1PredictionsBui Attrition.csv", row.names= FALSE)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
