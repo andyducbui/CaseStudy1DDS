@@ -1,0 +1,530 @@
+---
+title: "FritoAttritionRMD"
+author: "Bui, Andy"
+date: "2026-02-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Libraries
+```{r libraries}
+library(class)
+library(caret)
+library(e1071)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(patchwork)
+library(scales)
+library(stringr)
+```
+
+## R Markdown
+
+##Loading Data
+```{r load data}
+data_file_path =  "C:/Users/bboym/OneDrive/Documents/SMU_School/DS_6306/CaseStudy1-data.csv"
+frito_lay_data = read.csv(file = data_file_path ,header = TRUE)
+frito_lay_data
+```
+
+##Cleaning Data
+```{r data cleanup}
+#Data Cleanup
+frito_lay_data$Attrition_factor <- factor(frito_lay_data$Attrition, levels = c("Yes","No"))
+frito_lay_data$Overtime_Num = ifelse(frito_lay_data$OverTime == "Yes", 1, 0)
+frito_lay_data$MaritalStatus_Num <-ifelse(frito_lay_data$MaritalStatus == "Divorced", 1, ifelse(frito_lay_data$MaritalStatus =="Married", 2,3))
+frito_lay_data$Attrition_relabel <- as.factor(ifelse(frito_lay_data$Attrition == "No", "Employed", "Quit"))
+summary(frito_lay_data)
+
+frito_lay_data %>% group_by(JobLevel) %>% summarise(mean_income = mean(MonthlyIncome))
+
+#Checking for NAs
+colSums(is.na(frito_lay_data))
+
+#Creating other DataFramers
+frito_attrition =  frito_lay_data %>% filter( Attrition_factor == "Yes")
+frito_no_attrition = frito_lay_data %>% filter( Attrition_factor == "No")
+frito_attrition
+summary(frito_attrition)
+```
+
+##Plotting Functions
+```{r plot functions}
+plot_attrition_relabel <- function(df,variable, label, sub, legend_check, hlab = NULL, vlab = NULL){
+    df %>%  count(!!sym(variable) , Attrition_relabel, name="n") %>% mutate(pct = n/sum(n)) %>% 
+    ggplot(aes(x=!!sym(variable), y=n, fill = Attrition_relabel)) + geom_col(position = "dodge") + 
+    scale_fill_manual(name = "Employment Status", values= c("Employed" = "#2196F3", "Quit"= "#F44336")) +
+    geom_text(aes(label =n), position = position_dodge(width = 0.9), vjust = 1.1, color = "black", size=4.5) +
+    geom_text(aes(label = percent(pct, accuracy = 0.1)), position = position_dodge(width = 0.9), vjust = -0.3, size = 4.5) +
+    xlab(ifelse(is.null(hlab), "" ,hlab))+
+    ylab(ifelse(is.null(vlab), "" ,vlab))+
+    theme(legend.position = legend_check, fill ="",  text = element_text(size=13.5))+
+    ggtitle(label, subtitle = sub)
+}
+
+plot_attrition_group <- function(df,variable, label, sub, legend_check, hlab = NULL, vlab = NULL){
+    df %>%  count(!!sym(variable) , Attrition_relabel, name="n") %>% group_by(!!sym(variable)) %>% mutate(pct = n/sum(n)) %>%  ungroup() %>%
+    ggplot(aes(x=!!sym(variable), y=n, fill = Attrition_relabel)) + geom_col(position = "dodge") + 
+    scale_fill_manual(name = "Employment Status", values= c("Employed" = "#2196F3", "Quit"= "#F44336")) +
+    geom_text(aes(label =n), position = position_dodge(width = 0.9), vjust = 1.1, color = "black", size=4.5) +
+    geom_text(aes(label = percent(pct, accuracy = 0.1)), position = position_dodge(width = 0.9), vjust = -0.3, size = 4.5) +
+    xlab(ifelse(is.null(hlab), "" ,hlab))+
+    ylab(ifelse(is.null(vlab), "" ,vlab))+
+    theme(legend.position = legend_check, fill ="",  text = element_text(size=13.5))+
+    ggtitle(label, subtitle = sub)
+}
+
+plot_attrition_only <- function(df,variable, label, sub, legend_check, hlab = NULL, vlab = NULL){
+  df %>% count(!!sym(variable) , Attrition, name="n") %>% mutate(pct = n/sum(n)) %>% 
+    ggplot(aes(x=!!sym(variable), y=n, fill = Attrition)) + geom_col(position = "dodge") + 
+    scale_fill_manual(name = NULL, values= c("Yes" = "#F44336")) +
+    #geom_text(aes(label =n), position = position_dodge(width = 0.9), vjust = 1.1, color = "black", size=4.5) +
+    #geom_text(aes(label = percent(pct, accuracy = 0.1)), position = position_dodge(width = 0.9), vjust = -0.3, size = 4.5) +
+    xlab(ifelse(is.null(hlab), "" ,hlab))+
+    ylab(ifelse(is.null(vlab), "" ,vlab))+
+    theme(legend.position = legend_check, fill ="", , text = element_text(size=15))+
+    ggtitle(label, subtitle = sub)
+}
+
+plot_box <- function(df, var1,var2,label,sub,legend_check,hlab = NULL){
+  df %>% ggplot(aes(x=!!sym(var1), y=!!sym(var2), fill = Attrition_relabel)) + geom_boxplot() + 
+    scale_fill_manual(name = NULL, values= c("Employed" = "#2196F3", "Quit"= "#F44336")) +
+    #geom_text(aes(label =n), position = position_dodge(width = 0.9), vjust = 1.1, color = "black", size=4.5) +
+    #geom_text(aes(label = percent(pct, accuracy = 0.1)), position = position_dodge(width = 0.9), vjust = -0.3, size = 4.5) +
+    xlab(ifelse(is.null(hlab),str_replace_all(var1, "(?<!^)(?=[A-Z])", " "),hlab))+
+    ylab(NULL)+
+    theme(legend.position = legend_check, fill ="" , text = element_text(size=15))+
+    ggtitle(label, subtitle = sub)
+}
+
+plot_attrition<- function(df, var1,var2,label,sub,legend_check){
+  df %>% ggplot(aes(x=!!sym(var1), y=!!sym(var2), colour = Attrition)) + geom_point() + 
+    scale_fill_manual(name = NULL, values= c("Yes" = "#F44336")) +
+    #geom_text(aes(label =n), position = position_dodge(width = 0.9), vjust = 1.1, color = "black", size=4.5) +
+    #geom_text(aes(label = percent(pct, accuracy = 0.1)), position = position_dodge(width = 0.9), vjust = -0.3, size = 4.5) +
+    xlab(NULL)+
+    ylab(NULL)+
+    theme(legend.position = ifelse(legend.position = legend_check, fill ="" , text = element_text(size=15)))+
+    ggtitle(label, subtitle = sub)
+}
+
+plot_histogram<-function(df,variable, label, sub, legend_check){
+  df %>% ggplot(aes(x=!!sym(variable), fill = Attrition_relabel)) + geom_histogram() + 
+    scale_fill_manual(name = NULL, values= c("Employed" = "#2196F3", "Quit"= "#F44336")) +
+    xlab(ifelse(is.null(hlab), "" ,hlab))+
+    ylab(ifelse(is.null(vlab), "" ,vlab))+
+    theme(legend.position = ifelse(legend_check,"bottom","none"), fill ="",  text = element_text(size=13.5))+
+    ggtitle(label, subtitle = sub)
+}
+
+
+```
+
+## Including Plots
+```{r pressure, echo=FALSE}
+
+#Plotting Attrition
+plot_attrition_relabel(frito_lay_data, "Attrition_relabel" , "Employee Attrition Data: Employed vs. Quit", "730 Employed | 140 Quit", "none", NULL, "Employee Count")
+
+#Gender
+plot_attrition_group(frito_lay_data,"Gender","Employee Attrition Data by Gender", NULL, "right", NULL, "Employee Count")
+
+#Monthly Income
+plot_box(frito_lay_data, "MonthlyIncome", "Attrition_relabel","Attrition By Monthly Income", NULL, "none", NULL)
+
+#Overtime
+plot_attrition_group(frito_lay_data, "OverTime","Attrition By Overtime", NULL, "none", NULL, "Employee Count")
+
+#Age
+plot_box(frito_lay_data, "Age","Attrition_relabel","Attrition By Age", NULL, "none",NULL)
+
+#Total Working Years
+plot_box(frito_lay_data, "TotalWorkingYears","Attrition_relabel","Attrition by Cumulative Years", NULL, "none", NULL)
+
+#Job Role
+plot_attrition_relabel(frito_attrition, "JobRole","Attrition by Job Role", NULL, "none", "Employee Count", NULL)
+
+#Filtering high attrition DF
+frito_job_role <- frito_lay_data %>% filter(JobRole =="Research Scientist" | grepl("Sales", JobRole)|JobRole  == "Laboratory Technician")
+
+#Filtering lowest attrition DF
+frito_job_low <- frito_lay_data %>% filter(JobRole =="Healthcare Representative" | grepl("Man", JobRole)|JobRole  == "Research Director")
+
+#Job Role high attrition
+plot_attrition_group(frito_job_role,"JobRole","Attrition by Job Role","none", NULL, "Employee Count")
+
+#Job Role Low Attrition
+plot_attrition_group(frito_job_low,"JobRole","Attrition by Job Role","none", NULL, "Employee Count")
+
+#Years with current manager
+plot_box(frito_lay_data, "YearsWithCurrManager", "Attrition_relabel","Attrition By Time With Current Manager", NULL, "none", "Years with Current Manager")
+
+#Marital Status
+plot_attrition_group(frito_lay_data, "MaritalStatus", "Attrition by Marital Status", NULL, "none", NULL, NULL)
+
+#Job Level
+plot_attrition_relabel(frito_attrition, "JobLevel", "Attrition by Job Level", NULL, "none", NULL, NULL)
+
+
+#MegaPlotting
+cat_cols <- c("EducationField","WorkLifeBalance")
+num_cols <- c("YearsAtCompany")
+
+p_cat <- lapply(cat_cols, \(v)
+                ggplot(frito_lay_data, aes(x = .data[[v]], fill = frito_lay_data$Attrition_relabel)) +
+                  scale_fill_manual(name="Attrition Status",values= c("Employed" = "#2196F3", "Quit"= "#F44336")) +
+                  geom_bar(position="dodge") + labs(title = v, y = "Count") +
+                  ylab("Employee Count") +
+                  theme_minimal() +
+                  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+)
+
+p_num <- lapply(num_cols, \(v)
+                ggplot(frito_lay_data, aes(x = .data[[v]], fill = frito_lay_data$Attrition_relabel)) +
+                  geom_bar(position="dodge") + labs(title = v, y = "Count") +
+                  scale_fill_manual(name="Attrition Status",values= c("Employed" = "#2196F3", "Quit"= "#F44336")) +
+                  ylab("Employee Count") +
+                  theme_minimal()
+)
+
+wrap_plots(c(p_cat, p_num), ncol = 3)
+
+cat_cols <- c("Department", "BusinessTravel")
+num_cols <- c("YearsAtCompany","YearsInCurrentRole", "Age", "EnvironmentSatisfaction", "JobLevel")
+
+p_cat <- lapply(cat_cols, \(v)
+                ggplot(frito_lay_data, aes(x = .data[[v]], fill = frito_lay_data$Attrition_relabel)) +
+                  scale_fill_manual(name="Attrition Status",values= c("Employed" = "#2196F3", "Quit"= "#F44336")) +
+                  geom_bar(position="dodge") + labs(title = v, y = "Count") +
+                  theme_minimal() +
+                  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+)
+
+p_num <- lapply(num_cols, \(v)
+                ggplot(frito_lay_data, aes(x = .data[[v]], fill = frito_lay_data$Attrition_relabel)) +
+                  geom_bar(position="dodge") + labs(title = v, y = "Count") +
+                  scale_fill_manual(name="Attrition Status",values= c("Employed" = "#2196F3", "Quit"= "#F44336")) +
+                  theme_minimal()
+)
+
+wrap_plots(c(p_cat, p_num), ncol = 3)
+
+
+cat_cols <- c("JobRole","MaritalStatus","OverTime")
+num_cols <- c("DistanceFromHome","Education", "JobInvolvement", "NumCompaniesWorked")
+
+p_cat <- lapply(cat_cols, \(v)
+                ggplot(frito_lay_data, aes(x = .data[[v]], fill = frito_lay_data$Attrition_relabel)) +
+                  scale_fill_manual(name="Attrition Status",values= c("Employed" = "#2196F3", "Quit"= "#F44336")) +
+                  geom_bar(position="dodge") + labs(title = v, y = "Count") +
+                  theme_minimal() +
+                  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+)
+
+p_num <- lapply(num_cols, \(v)
+                ggplot(frito_lay_data, aes(x = .data[[v]], fill = frito_lay_data$Attrition_relabel)) +
+                  geom_bar(position="dodge") + labs(title = v, y = "Count") +
+                  scale_fill_manual(name="Attrition Status",values= c("Employed" = "#2196F3", "Quit"= "#F44336")) +
+                  theme_minimal()
+)
+
+wrap_plots(c(p_cat, p_num), ncol = 3)
+
+num_cols <- c("YearsSinceLastPromotion","YearsWithCurrManager", "TotalWorkingYears", "PercentSalaryHike", "RelationshipSatisfaction", "PerformanceRating")
+
+p_num <- lapply(num_cols, \(v)
+                ggplot(frito_no_attrition, aes(x = .data[[v]])) +
+                  geom_histogram(bins = 20) + labs(title = v, y = "Count") +
+                  theme_minimal()
+)
+
+wrap_plots(c(p_cat, p_num), ncol = 3)
+wrap_plots(c(p_num), ncol = 3)
+
+```
+
+##KNN Model
+```{r knn}
+dim(frito_lay_data)
+
+set.seed(5)
+split_perc = .7
+
+#Sample, Train and Test Data
+train_indices = sample(1:dim(frito_lay_data)[1], round(split_perc * dim(frito_lay_data)[1]))
+train_frito = frito_lay_data[train_indices,]
+test_frito = frito_lay_data[-train_indices,]
+
+#Ensure converted string to num columns are factors
+train_frito$JobRole <- as.factor(train_frito$JobRole)
+test_frito$JobRole  <- as.factor(test_frito$JobRole)
+train_frito$MaritalStatus <- as.factor(train_frito$MaritalStatus)
+test_frito$MaritalStatus  <- as.factor(test_frito$MaritalStatus)
+
+#Ensuring levels
+test_frito$MaritalStatus <- factor(test_frito$MaritalStatus, levels = levels(train_frito$MaritalStatus))
+test_frito$JobRole       <- factor(test_frito$JobRole,       levels = levels(train_frito$JobRole))
+
+#Dummy Encoding(Instead of creating fake distances, only set the value true for when it is that state and zeros for the rest)
+ms_train <- model.matrix(~ MaritalStatus - 1, data = train_frito)
+ms_test  <- model.matrix(~ MaritalStatus - 1, data = test_frito)
+jr_train <- model.matrix(~ JobRole - 1, data = train_frito)
+jr_test  <- model.matrix(~ JobRole - 1, data = test_frito)
+
+train_frito_predictors <- cbind(train_frito[,c("Age","YearsInCurrentRole","JobLevel",
+                                               "TotalWorkingYears","MonthlyIncome","Overtime_Num","YearsWithCurrManager")],ms_train,jr_train)
+
+test_frito_predictors <- cbind(test_frito[,c("Age","YearsInCurrentRole","JobLevel","TotalWorkingYears",
+                                             "MonthlyIncome","Overtime_Num","YearsWithCurrManager")],ms_test,jr_test)
+
+
+scaled_train_frito <- scale(train_frito_predictors)
+scaled_test_frito <- scale(test_frito_predictors,
+                           center = attr(scaled_train_frito, "scaled:center"),
+                           scale  = attr(scaled_train_frito, "scaled:scale"))
+
+classifications =  knn(scaled_train_frito, scaled_test_frito, cl = train_frito$Attrition_factor, prob = TRUE, k = 5)
+
+
+CM = confusionMatrix(classifications,test_frito$Attrition_factor,  positive = "Yes")
+CM
+cm_table<- as.data.frame(CM$table)
+cm_table
+summary(cm_table)
+
+#Labeling Square for GGPlot
+cm_table$cell_type <- case_when( 
+  cm_table$Prediction == "Yes" & cm_table$Reference == "Yes" ~ "true_pos",
+  cm_table$Prediction == "Yes" & cm_table$Reference == "No"  ~ "false_pos",
+  cm_table$Prediction == "No"  & cm_table$Reference == "Yes" ~ "false_neg",
+  cm_table$Prediction == "No"  & cm_table$Reference == "No"  ~ "true_neg"
+)
+
+#Grouping by color; Uses grep to find keyword
+cm_table$color_group <- ifelse(grepl("pos", cm_table$cell_type), "positive", "negative")
+
+#Creating Box Diagram
+cm_table %>% ggplot(aes(x=Reference, y=Prediction, fill = interaction(color_group, cell_type))) + 
+  geom_tile(color = "white", linewidth = 2) + 
+  geom_text(aes(label = Freq), size = 10, fontface = "bold") + 
+    scale_fill_manual(values = c(
+    "positive.true_pos"  = "#1565C0",
+    "positive.false_pos" = "#90CAF9",  
+    "negative.true_neg"  = "#1B5E20",  
+    "negative.false_neg" = "#A5D6A7"   
+  )) + 
+  scale_x_discrete(limits = c("Yes", "No")) +
+  scale_y_discrete(limits = c("No", "Yes")) +
+  labs(title = "KNN Model - Attrition",x = "Actual", y = "Predicted") + 
+  theme(legend.position = "none")
+
+#Converting probs to all percentages of possibility of yes
+classifications
+attributes(classifications)
+probs = ifelse(classifications == "Yes", attributes(classifications)$prob, 1- attributes(classifications)$prob)
+
+summary(frito_lay_data$Attrition_relabel)
+probs
+threshold =.1
+
+new_class =factor(ifelse(probs>=threshold, "Yes","No"), levels = c("Yes", "No"))
+summary(new_class)
+table(new_class,test_frito$Attrition_factor)
+cm_thresh = confusionMatrix(new_class,test_frito$Attrition_factor)
+cm_thresh
+
+cm_table<- as.data.frame(cm_thresh$table)
+cm_table
+summary(cm_table)
+
+
+#Labeling Square for GGPlot
+cm_table$cell_type <- case_when( 
+  cm_table$Prediction == "Yes" & cm_table$Reference == "Yes" ~ "true_pos",
+  cm_table$Prediction == "Yes" & cm_table$Reference == "No"  ~ "false_pos",
+  cm_table$Prediction == "No"  & cm_table$Reference == "Yes" ~ "false_neg",
+  cm_table$Prediction == "No"  & cm_table$Reference == "No"  ~ "true_neg"
+)
+
+#Grouping by color; Uses grep to find keyword
+cm_table$color_group <- ifelse(grepl("pos", cm_table$cell_type), "positive", "negative")
+head(cm_table)
+
+#Creating Box Diagram
+cm_table %>% ggplot(aes(x=Reference, y=Prediction, fill = interaction(color_group, cell_type))) + 
+  geom_tile(color = "white", linewidth = 2) + 
+  geom_text(aes(label = Freq), size = 10, fontface = "bold") + 
+    scale_fill_manual(values = c(
+    "positive.true_pos"  = "#1565C0",
+    "positive.false_pos" = "#90CAF9",  
+    "negative.true_neg"  = "#1B5E20",  
+    "negative.false_neg" = "#A5D6A7"   
+  )) + 
+  scale_x_discrete(limits = c("Yes", "No")) +
+  scale_y_discrete(limits = c("No", "Yes")) +
+  labs(title = "Updated KNN Model - Attrition",x = "Actual", y = "Predicted") + 
+  theme(legend.position = "none")
+```
+##Naive Bayes
+```{r Naive Bayes}
+set.seed(5)
+split_perc = .7
+
+#Sample, Train and Test Data
+train_indices = sample(1:dim(frito_lay_data)[1], round(split_perc * dim(frito_lay_data)[1]))
+train_frito = frito_lay_data[train_indices,]
+test_frito = frito_lay_data[-train_indices,]
+
+#Ensure converted string to num columns are factors
+train_frito$JobRole <- as.factor(train_frito$JobRole)
+test_frito$JobRole  <- as.factor(test_frito$JobRole)
+train_frito$MaritalStatus <- as.factor(train_frito$MaritalStatus)
+test_frito$MaritalStatus  <- as.factor(test_frito$MaritalStatus)
+
+#Ensuring levels
+test_frito$MaritalStatus <- factor(test_frito$MaritalStatus, levels = levels(train_frito$MaritalStatus))
+test_frito$JobRole       <- factor(test_frito$JobRole,       levels = levels(train_frito$JobRole))
+
+#Dummy Encoding(Instead of creating fake distances, only set the value true for when it is that state and zeros for the rest)
+ms_train <- model.matrix(~ MaritalStatus - 1, data = train_frito)
+ms_test  <- model.matrix(~ MaritalStatus - 1, data = test_frito)
+jr_train <- model.matrix(~ JobRole - 1, data = train_frito)
+jr_test  <- model.matrix(~ JobRole - 1, data = test_frito)
+
+#Predictors
+train_frito_predictors <- cbind(train_frito[,c("Age","YearsInCurrentRole","JobLevel","TotalWorkingYears","MonthlyIncome",
+                                               "Overtime_Num","YearsWithCurrManager")],ms_train,jr_train)
+test_frito_predictors <- cbind(test_frito[,c("Age","YearsInCurrentRole","JobLevel","TotalWorkingYears","MonthlyIncome",
+                                             "Overtime_Num","YearsWithCurrManager")],ms_test,jr_test)
+
+ 
+
+#NaiveBayes model 
+model <- naiveBayes(train_frito_predictors,train_frito$Attrition_factor)
+model
+
+pred_class <- predict(model, newdata = test_frito_predictors, type = "class")
+pred_class
+pred_class <- factor(pred_class, levels = levels(train_frito$Attrition_factor))
+test_y     <- factor(test_frito$Attrition_factor, levels = levels(train_frito$Attrition_factor))
+test_y
+CM <- confusionMatrix(pred_class, test_y, positive = "Yes")
+CM
+
+cm_table<- as.data.frame(CM$table)
+cm_table
+summary(cm_table)
+
+#Labeling Square for GGPlot
+cm_table$cell_type <- case_when( 
+  cm_table$Prediction == "Yes" & cm_table$Reference == "Yes" ~ "true_pos",
+  cm_table$Prediction == "Yes" & cm_table$Reference == "No"  ~ "false_pos",
+  cm_table$Prediction == "No"  & cm_table$Reference == "Yes" ~ "false_neg",
+  cm_table$Prediction == "No"  & cm_table$Reference == "No"  ~ "true_neg"
+)
+
+#Grouping by color; Uses grep to find keyword
+cm_table$color_group <- ifelse(grepl("pos", cm_table$cell_type), "positive", "negative")
+
+#Creating Box Diagram
+cm_table %>% ggplot(aes(x=Reference, y=Prediction, fill = interaction(color_group, cell_type))) + 
+  geom_tile(color = "white", linewidth = 2) + 
+  geom_text(aes(label = Freq), size = 10, fontface = "bold") + 
+    scale_fill_manual(values = c(
+    "positive.true_pos"  = "#1565C0",
+    "positive.false_pos" = "#90CAF9",  
+    "negative.true_neg"  = "#1B5E20",  
+    "negative.false_neg" = "#A5D6A7"   
+  )) + 
+  scale_x_discrete(limits = c("Yes", "No")) +
+  scale_y_discrete(limits = c("No", "Yes")) +
+  labs(title = "Naive Bayes Model",x = "Actual", y = "Predicted") + 
+  theme(legend.position = "none")
+
+
+#Converting results to numerics for predicting with lowered threshold
+pred_class <- predict(model, newdata = test_frito_predictors, type = "raw")
+pred_class
+
+#Threshold nad reclassifying
+threshold =.3
+new_class = factor(ifelse(pred_class[,"Yes"] >threshold, "Yes","No"),levels = c("Yes","No"))
+new_class
+
+summary(new_class)
+table(new_class,test_frito$Attrition_factor)
+cm_thresh = confusionMatrix(table(new_class,test_frito$Attrition_factor), mode="everything")
+cm_thresh
+
+cm_table<- as.data.frame(cm_thresh$table)
+cm_table
+summary(cm_table)
+
+
+cm_table$cell_type <- case_when( 
+  cm_table$new_class == "Yes" & cm_table$Var2 == "Yes" ~ "true_pos",
+  cm_table$new_class == "Yes" & cm_table$Var2 == "No"  ~ "false_pos",
+  cm_table$new_class == "No"  & cm_table$Var2 == "Yes" ~ "false_neg",
+  cm_table$new_class == "No"  & cm_table$Var2 == "No"  ~ "true_neg"
+)
+
+cm_table$color_group <- ifelse(grepl("pos", cm_table$cell_type), "positive", "negative")
+
+
+cm_table %>% ggplot(aes(x=Var2, y=new_class, fill = interaction(color_group, cell_type))) + 
+  geom_tile(color = "white", linewidth = 2) + 
+  geom_text(aes(label = Freq), size = 10, fontface = "bold") + 
+    scale_fill_manual(values = c(
+    "positive.true_pos"  = "#1565C0",
+    "positive.false_pos" = "#90CAF9",  
+    "negative.true_neg"  = "#1B5E20",  
+    "negative.false_neg" = "#A5D6A7"   
+  )) + 
+  scale_x_discrete(limits = c("Yes", "No")) +
+  scale_y_discrete(limits = c("No", "Yes")) +
+  labs(title = "Naive Bayes Model",x = "Actual", y = "Predicted") + 
+  theme(legend.position = "none")
+
+#Compset Data
+data_file_path =  "C:/Users/bboym/OneDrive/Documents/SMU_School/DS_6306/CaseStudy1CompSet No Attrition.csv"
+frito_comp_set = read.csv(file = data_file_path ,header = TRUE)
+frito_comp_set
+
+#Data Cleanup
+frito_comp_set$Overtime_Num = ifelse(frito_comp_set$OverTime == "Yes", 1, 0)
+frito_comp_set$MaritalStatus_Num <-ifelse(frito_comp_set$MaritalStatus == "Divorced", 1, ifelse(frito_comp_set$MaritalStatus =="Married", 2,3))
+frito_comp_set$JobRole  <- as.factor(frito_comp_set$JobRole)
+frito_comp_set$MaritalStatus <- as.factor(frito_comp_set$MaritalStatus)
+frito_comp_set$MaritalStatus <- factor(frito_comp_set$MaritalStatus, levels = levels(train_frito$MaritalStatus))
+frito_comp_set$JobRole       <- factor(frito_comp_set$JobRole,       levels = levels(train_frito$JobRole))
+comp_ms <- model.matrix(~ MaritalStatus - 1, data = frito_comp_set)
+comp_jr <- model.matrix(~ JobRole - 1, data = frito_comp_set)
+frito_comp_set_predictors <- cbind(frito_comp_set[,c("Age","YearsInCurrentRole","JobLevel","TotalWorkingYears","MonthlyIncome",
+                                               "Overtime_Num","YearsWithCurrManager")],comp_ms,comp_jr)
+
+#Checking for NAs
+colSums(is.na(frito_comp_set))
+
+
+#Predicting with using Naive Bayes with lowered threshold
+pred_comp_set <- predict(model, newdata = frito_comp_set_predictors, type = "raw")
+pred_comp_set
+threshold =.3
+comp_set_thresh = factor(ifelse(pred_comp_set[,"Yes"] >threshold, "Yes","No"),levels = c("Yes","No"))
+comp_set_thresh
+comp_thresh_id <- data.frame(ID = frito_comp_set$ID, Attrition = comp_set_thresh)
+comp_thresh_id
+
+#Writing CSV
+write.csv(comp_thresh_id, "Case1PredictionsBui Attrition.csv", row.names= FALSE)
+
+
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
